@@ -12,9 +12,50 @@ pub fn clay__min[T](x T, y T) T {
 }
 
 
-pub fn clay__text_config(c Clay_TextElementConfig) Clay_TextElementConfig {
+
+
+pub fn clay_text_config(c Clay_TextElementConfig) Clay_TextElementConfig {
 	return clay__store_text_element_config(c)
 }
+
+pub fn clay_border_outside(width_value int) Clay_BorderWidth {
+	return Clay_BorderWidth{left: width_value, top: width_value, right: width_value, bottom: width_value, between_children: 0}
+}
+
+pub fn clay_border_all(width_value int) Clay_BorderWidth {
+	return Clay_BorderWidth{left: width_value, top: width_value, right: width_value, bottom: width_value, between_children: width_value}
+}
+
+pub fn clay_corner_radius(radius f32) Clay_CornerRadius {
+	return Clay_CornerRadius{top_left: radius, top_right: radius, bottom_left: radius, bottom_right: radius}
+}
+
+pub fn clay_padding_all(padding u16) Clay_Padding {
+	return Clay_Padding{left: padding, right: padding, top: padding, bottom: padding}
+}
+
+pub fn clay_sizing_fit(sizing Clay_SizingMinMax) Clay_SizingAxis {
+	return Clay_SizingAxis{
+		size: Clay_SizingMinMax{
+			min: sizing.min,
+			max: sizing.max,
+		},
+		type: Clay__SizingType.fit,
+	}
+}
+
+pub fn clay_sizing_grow(sizing Clay_SizingMinMax) Clay_SizingAxis {
+	return Clay_SizingAxis{
+		size: Clay_SizingMinMax{
+			min: sizing.min,
+			max: sizing.max,
+		},
+		type: Clay__SizingType.grow,
+	}
+}
+
+
+
 
 pub fn clay__store_text_element_config(c Clay_TextElementConfig) Clay_TextElementConfig {
 	mut ctx := clay__get_current_context()
@@ -23,6 +64,8 @@ pub fn clay__store_text_element_config(c Clay_TextElementConfig) Clay_TextElemen
 	}
 	return Clay__TextElementConfigArray_Add(&ctx.text_element_configs, c)
 }
+
+
 
 
 @[params]
@@ -50,4 +93,40 @@ struct Clay_TextElementConfig {
     // CLAY_TEXT_ALIGN_CENTER - Horizontally aligns wrapped lines of text to the center of their bounding box.
     // CLAY_TEXT_ALIGN_RIGHT - Horizontally aligns wrapped lines of text to the right hand side of their bounding box.
     text_alignment Clay_TextAlignment
+}
+
+enum Clay__SizingType {
+	fit
+	grow
+	percent
+	fixed
+}
+
+@[params]
+struct Clay_SizingMinMax {
+	min f32 = 0.0
+	max f32 = 0.0
+}
+
+@[params]
+struct Clay_SizingAxis {
+	union {
+		Clay_SizingMinMax min_max
+		percent f32
+	} size
+	type Clay__SizingType
+}
+
+struct Clay_CornerRadius {
+	top_left f32
+	top_right f32
+	bottom_left f32
+	bottom_right f32
+}
+
+struct Clay_Padding {
+	left u16
+	right  u16
+	top u16
+	bottom u16
 }
