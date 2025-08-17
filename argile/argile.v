@@ -71,6 +71,27 @@ pub fn clay_sizing_percent(percent f32) Clay_SizingAxis {
 	}
 }
 
+pub fn clay__hash_string(key string, seed u32) Clay_ElementId {
+	mut hash := seed
+
+	for i in 0 .. key.len {
+		hash += key[i]
+		hash += (hash << 10)
+		hash ^= (hash >> 6)
+	}
+
+	hash += (hash << 3)
+	hash ^= (hash >> 11)
+	hash += (hash << 15)
+
+	return Clay_ElementId{
+		id: hash + 1      // Reserve the hash result of zero as "null id"
+		offset: 0
+		base_id: hash + 1 // Reserve the hash result of zero as "null id"
+		string_id: key
+	}
+}
+
 
 
 
@@ -146,4 +167,11 @@ struct Clay_Padding {
 	right  u16
 	top u16
 	bottom u16
+}
+
+struct Clay_ElementId {
+	id u32  		 // The resulting hash generated from the other fields.
+	offset u32 		 // A numerical offset applied after computing the hash from stringId.
+	base_id u32 	 // A base hash value to start from, for example the parent element ID is used when calculating CLAY_ID_LOCAL().
+	string_id string // The string id to hash.
 }
