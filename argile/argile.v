@@ -54,6 +54,23 @@ pub fn clay_sizing_grow(sizing Clay_SizingMinMax) Clay_SizingAxis {
 	}
 }
 
+pub fn clay_sizing_fixed(fixed_size f32) Clay_SizingAxis {
+	return Clay_SizingAxis{
+		size: Clay_SizingMinMax{
+			min: fixed_size,
+			max: fixed_size,
+		},
+		type: Clay__SizingType.fixed,
+	}
+}
+
+pub fn clay_sizing_percent(percent f32) Clay_SizingAxis {
+	return Clay_SizingAxis{
+		percent: percent,
+		type: Clay__SizingType.percent,
+	}
+}
+
 
 
 
@@ -95,7 +112,7 @@ struct Clay_TextElementConfig {
     text_alignment Clay_TextAlignment
 }
 
-enum Clay__SizingType {
+enum Clay__SizingType as u8 {
 	fit
 	grow
 	percent
