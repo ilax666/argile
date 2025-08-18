@@ -1,3 +1,4 @@
+@[has_globals]
 module argile
 
 
@@ -102,6 +103,10 @@ pub fn clay_idi_local(label string, index u32) Clay_ElementId {
 pub fn clay_sidi_local(label string, index u32) Clay_ElementId {
 	return clay__hash_string_with_offset(label, index, clay__get_parent_element_id())
 }
+
+__global (
+	clay__element_definition_latch u8
+)
 
 pub fn clay__hash_string(key string, seed u32) Clay_ElementId {
 	mut hash := seed
@@ -228,10 +233,10 @@ struct Clay_SizingMinMax {
 
 @[params]
 struct Clay_SizingAxis {
-	union {
+	size union {
 		Clay_SizingMinMax min_max
 		percent f32
-	} size
+	}
 	type Clay__SizingType
 }
 
