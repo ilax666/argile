@@ -108,7 +108,7 @@ __global (
 	clay__element_definition_latch u8
 )
 
-pub fn clay__open_element() {
+pub fn clay_open_element() {
 	mut ctx := clay__get_current_context()
 
 	if ctx.layout_elements.len == ctx.layout_elements.capacity - 1 || ctx.boolean_warnings.max_elements_exceeded {
@@ -139,7 +139,164 @@ pub fn clay__open_element() {
 	}
 }
 
-pub fn clay__close_element() {
+pub fn clay_configure_open_element(declaration Clay_ElementDeclaration) {
+    clay__configure_open_element_ptr(&declaration);
+}
+
+pub fn clay__configure_open_element_ptr(declaration &Clay_ElementDeclaration) {
+    mut ctx := clay__get_current_context()
+    mut open_layout_element := clay__get_open_layout_element()
+
+    // Set layoutConfig pointer from declaration
+    open_layout_element.layout_config = clay__store_layout_config(declaration.layout)
+
+    // Check for invalid percentages (>1.0)
+    if (declaration.layout.sizing.width.typ == .percent && declaration.layout.sizing.width.size.percent > 1.0)
+        || (declaration.layout.sizing.height.typ == .percent && declaration.layout.sizing.height.size.percent > 1.0) {
+        ctx.error_handler.error_handler_function(Clay_ErrorData{
+            error_type: .percentage_over_1
+            error_text: clay__string("An element was configured with CLAY_SIZING_PERCENT, but the provided percentage value was over 1.0. Clay expects a value between 0 and 1, i.e. 20% is 0.2.")
+            user_data: ctx.error_handler.user_data
+        })
+    }
+
+    mut open_layout_element_id := declaration.id
+
+    // Prepare elementConfigs array for this element
+    open_layout_element.element_configs.internal_array = &ctx.element_configs.internal_array[ctx.element_configs.length]
+
+    mut shared_config &Clay_SharedElementConfig := voidptr
+
+    // Background color
+    if declaration.background_color.a > 0 {
+        shared_config = clay__store_shared_element_config(Clay_SharedElementConfig{ background_color: declaration.background_color })
+        clay__attach_element_config(Clay_ElementConfigUnion{ shared_element_config: shared_config }, .shared)
+    }
+
+    // Corner radius
+    if clay__memcmp(&declaration.corner_radius, &Clay_CornerRadius_DEFAULT, sizeof(Clay_CornerRadius)) != 0 {
+        if shared_config != voidptr {
+            shared_config.corner_radius = declaration.corner_radius
+        } else {
+            shared_config = clay__store_shared_element_config(Clay_SharedElementConfig{ corner_radius: declaration.corner_radius })
+            clay__attach_element_config(Clay_ElementConfigUnion{ shared_element_config: shared_config }, .shared)
+        }
+    }
+
+    // User data
+    if declaration.user_data != 0 {
+        if shared_config != voidptr {
+            shared_config.user_data = declaration.user_data
+        } else {
+            shared_config = clay__store_shared_element_config(Clay_SharedElementConfig{ user_data: declaration.user_data })
+            clay__attach_element_config(Clay_ElementConfigUnion{ shared_element_config: shared_config }, .shared)
+        }
+    }
+
+    // Image
+    if declaration.image.image_data != voidptr {
+        clay__attach_element_config(Clay_ElementConfigUnion{ image_element_config: clay__store_image_element_config(declaration.image) }, .image)
+    }
+
+    // Aspect ratio
+    if declaration.aspect_ratio.aspect_ratio > 0 {
+        clay__attach_element_config(Clay_ElementConfigUnion{ aspect_ratio_element_config: clay__store_aspect_ratio_element_config(declaration.aspect_ratio) }, .aspect)
+        ctx.aspect_ratio_element_indexes << (ctx.layout_elements.len - 1)
+    }
+
+    // Floating
+    if declaration.floating.attach_to != .none {
+        mut floating_config := declaration.floating
+        // Because of root element auto-gen, tree depth will always be at least 2 here
+        parent_index := ctx.open_layout_element_stack[ctx.open_layout_element_stack.len - 2]
+        hierarchical_parent := clay__get_layout_element(parent_index)
+        if hierarchical_parent != voidptr {
+            mut clip_element_id := u32(0)
+            if declaration.floating.attach_to == .parent {
+                floating_config.parent_id = hierarchical_parent.id
+                if ctx.open_clip_element_stack.len > 0 {
+                    clip_element_id = ctx.open_clip_element_stack.last()
+                }
+            } else if declaration.floating.attach_to == .element_with_id {
+                parent_item := clay__get_hash_map_item(floating_config.parent_id)
+                if parent_item == voidptr {
+                    ctx.error_handler.error_handler_function(Clay_ErrorData{
+                        error_type: .floating_container_parent_not_found
+                        error_text: "A floating element was declared with a parentId, but no element with that ID was found."
+                        user_data: ctx.error_handler.user_data
+                    })
+                } else {
+                    parent_offset := int(parent_item.layout_element - &ctx.layout_elements.internal_array[0])
+                    clip_element_id = ctx.layout_element_clip_element_ids[parent_offset]
+                }
+            } else if declaration.floating.attach_to == .root {
+                floating_config.parent_id = clay__hash_string("Clay__RootContainer", 0).id
+            }
+            if open_layout_element_id.id == 0 {
+                open_layout_element_id = clay__hash_string_with_offset("Clay__FloatingContainer", ctx.layout_element_tree_roots.len, 0)
+            }
+            if declaration.floating.clip_to == .none {
+                clip_element_id = 0
+            }
+            current_index := ctx.open_layout_element_stack.last()
+            ctx.layout_element_clip_element_ids[current_index] = clip_element_id
+            ctx.open_clip_element_stack << clip_element_id
+            ctx.layout_element_tree_roots << Clay_LayoutElementTreeRoot{
+                layout_element_index: current_index
+                parent_id: floating_config.parent_id
+                clip_element_id: clip_element_id
+                z_index: floating_config.z_index
+            }
+            clay__attach_element_config(Clay_ElementConfigUnion{ floating_element_config: clay__store_floating_element_config(floating_config) }, .floating)
+        }
+    }
+
+    // Custom config
+    if declaration.custom.custom_data != voidptr {
+        clay__attach_element_config(Clay_ElementConfigUnion{ custom_element_config: clay__store_custom_element_config(declaration.custom) }, .custom)
+    }
+
+    // IDs
+    if open_layout_element_id.id != 0 {
+        clay__attach_id(open_layout_element_id)
+    } else if open_layout_element.id == 0 {
+        open_layout_element_id = clay__generate_id_for_anonymous_element(open_layout_element)
+    }
+
+    // Clip
+    if declaration.clip.horizontal || declaration.clip.vertical {
+        clay__attach_element_config(Clay_ElementConfigUnion{ clip_element_config: clay__store_clip_element_config(declaration.clip) }, .clip)
+        ctx.open_clip_element_stack << int(open_layout_element.id)
+
+        mut scroll_offset := voidptr
+        for i in 0 .. ctx.scroll_container_datas.len {
+            mapping := &ctx.scroll_container_datas[i]
+            if open_layout_element.id == mapping.element_id {
+                scroll_offset = mapping
+                scroll_offset.layout_element = open_layout_element
+                scroll_offset.open_this_frame = true
+            }
+        }
+        if scroll_offset == voidptr {
+            scroll_offset = &ctx.scroll_container_datas << Clay_ScrollContainerDataInternal{
+                layout_element: open_layout_element
+                scroll_origin: [-1, -1]
+                element_id: open_layout_element.id
+                open_this_frame: true
+            }
+        }
+        if ctx.external_scroll_handling_enabled {
+            scroll_offset.scroll_position = clay__query_scroll_offset(scroll_offset.element_id, ctx.query_scroll_offset_user_data)
+        }
+    }
+
+    // Border
+    if clay__memcmp(&declaration.border.width, &Clay_BorderWidth_DEFAULT, sizeof(Clay_BorderWidth)) != 0 {
+        clay__attach_element_config(Clay_ElementConfigUnion{ border_element_config: clay__store_border_element_config(declaration.border) }, .border)
+    }
+}
+
+pub fn clay_close_element() {
     mut ctx := clay__get_current_context()
 
     if ctx.boolean_warnings.max_elements_exceeded {
@@ -253,6 +410,57 @@ pub fn clay__close_element() {
         open_layout_element.children_or_text_content.children.length++
         ctx.layout_element_children_buffer << closing_element_index
     }
+}
+
+pub fn clay_text(text string, text_config &Clay_TextElementConfig) {
+    clay__open_text_element(text, text_config)
+}
+
+pub fn clay__open_text_element(text string, text_config &Clay_TextElementConfig) {
+	mut ctx := clay__get_current_context()
+	if ctx.layout_elements.len == ctx.layout_elements.capacity - 1 || ctx.boolean_warnings.max_elements_exceeded {
+        ctx.boolean_warnings.max_elements_exceeded = true
+        return
+    }
+    mut parent_element := clay__get_open_layout_element()
+
+    mut layout_element := Clay_LayoutElement{}
+    text_element := clay__layout_element_array_add(&ctx.layout_elements, layout_element)
+    if ctx.open_clip_element_stack.len > 0 {
+        &ctx.layout_element_clip_element_ids[ctx.layout_elements.len - 1] = ctx.open_clip_element_stack[ctx.open_clip_element_stack.len - 1]
+    } else {
+        &ctx.layout_element_clip_element_ids[ctx.layout_elements.len - 1] = 0
+    }
+
+    ctx.layout_element_children_buffer << ctx.layout_elements.len - 1
+    mut text_measured := clay__measure_text_cached(text, text_config)
+    mut element_id := clay__hash_number(parent_element.children_or_text_content.children.length, parent_element.id)
+    text_element.id = element_id.id
+    clay__add_hash_map_item(element_id, text_element, 0)
+    &ctx.layout_element_id_strings << element_id.string_id
+    mut text_dimensions := Clay_Dimensions{
+        width: text_measured.unwrapped_dimensions.width
+        height: if text_config.line_height > 0 { text_config.line_height } else { text_measured.unwrapped_dimensions.height }
+    }
+    text_element.dimensions = text_dimensions
+    text_element.min_dimensions = Clay_Dimensions {
+        width: text_measured.min_width,
+        height: text_dimensions.height
+    }
+    text_element.children_or_text_content.text_element_data = clay__text_element_data_array_add(&ctx.text_element_data, Clay_TextElementData {
+        text: text,
+        preferred_dimensions: text_measured.unwrapped_dimensions,
+        element_index: ctx.layout_elements.len - 1
+    })
+    text_element.element_configs = Clay_ElementConfigArraySlice {
+        length: 1
+        internal_array: clay__element_config_array_add(&ctx.element_configs, Clay_ElementConfig {
+            type: CLAY__ELEMENT_CONFIG_TYPE_TEXT
+            config: {text_element_config: text_config}
+        })
+    }
+    text_element.layout_config = &CLAY_LAYOUT_DEFAULT
+    parent_element.children_or_text_content.children.length++
 }
 
 pub fn clay__hash_string(key string, seed u32) Clay_ElementId {
