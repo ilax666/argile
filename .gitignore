@@ -24,3 +24,6 @@ bin/
 
 # og source we porting from
 clay.h
+
+#misc
+argile/verify.bat

@@ -108,6 +108,153 @@ __global (
 	clay__element_definition_latch u8
 )
 
+pub fn clay__open_element() {
+	mut ctx := clay__get_current_context()
+
+	if ctx.layout_elements.len == ctx.layout_elements.capacity - 1 || ctx.boolean_warnings.max_elements_exceeded {
+		ctx.boolean_warnings.max_elements_exceeded = true
+		return
+	}
+
+	layout_element := Clay_LayoutElement{
+		children_or_text_content: Clay__LayoutElementChildren{
+			internal_array: &ctx.layout_element_children_buffer[ctx.layout_element_children.len]
+		}
+		dimensions: Clay_Dimensions_DEFAULT
+		min_dimensions: Clay_Dimensions_DEFAULT
+		layout_config: &Clay_LayoutConfig_DEFAULT
+		element_configs: Clay_ElementConfigArraySlice{
+			internal_array: &ctx.element_configs.internal_array[ctx.element_configs.length]
+		}
+		id: 0 // Will be set later
+	}
+
+	ctx.layout_elements << layout_element
+	ctx.open_layout_element_stack << ctx.layout_elements.len - 1
+
+	if ctx.open_clip_element_stack.len > 0 {
+		ctx.layout_element_clip_element_ids << ctx.open_clip_element_stack[ctx.open_clip_element_stack.len - 1]
+	} else {
+		ctx.layout_element_clip_element_ids << 0
+	}
+}
+
+pub fn clay__close_element() {
+    mut ctx := clay__get_current_context()
+
+    if ctx.boolean_warnings.max_elements_exceeded {
+        return
+    }
+
+    mut open_layout_element := clay__get_open_layout_element()
+    mut layout_config := open_layout_element.layout_config
+
+    mut element_has_clip_horizontal := false
+    mut element_has_clip_vertical := false
+
+    for i in 0 .. open_layout_element.element_configs.length {
+        config := clay__get_element_config(open_layout_element.element_configs, i)
+        if config.typ == .clip {
+            element_has_clip_horizontal = config.config.clip_element_config.horizontal
+            element_has_clip_vertical = config.config.clip_element_config.vertical
+            ctx.open_clip_element_stack.pop()
+            break
+        } else if config.typ == .floating {
+            ctx.open_clip_element_stack.pop()
+        }
+    }
+
+    left_right_padding := f32(layout_config.padding.left + layout_config.padding.right)
+    top_bottom_padding := f32(layout_config.padding.top + layout_config.padding.bottom)
+
+    // Attach children to the current open element
+    open_layout_element.children_or_text_content.children.internal_array = &ctx.layout_element_children.internal_array[ctx.layout_element_children.length]
+
+    if layout_config.layout_direction == .left_to_right {
+        open_layout_element.dimensions.width = left_right_padding
+        open_layout_element.min_dimensions.width = left_right_padding
+        for i in 0 .. open_layout_element.children_or_text_content.children.length {
+            child_index := ctx.layout_element_children_buffer[ctx.layout_element_children_buffer.len - open_layout_element.children_or_text_content.children.length + i]
+            child := clay__get_layout_element(child_index)
+            open_layout_element.dimensions.width += child.dimensions.width
+            open_layout_element.dimensions.height = clay__max(open_layout_element.dimensions.height, child.dimensions.height + top_bottom_padding)
+            // Minimum size of child elements doesn't matter to clip containers as they can shrink and hide their contents
+            if !element_has_clip_horizontal {
+                open_layout_element.min_dimensions.width += child.min_dimensions.width
+            }
+            if !element_has_clip_vertical {
+                open_layout_element.min_dimensions.height = clay__max(open_layout_element.min_dimensions.height, child.min_dimensions.height + top_bottom_padding)
+            }
+            ctx.layout_element_children << child_index
+        }
+        child_gap := f32(clay__max(open_layout_element.children_or_text_content.children.length - 1, 0) * layout_config.child_gap)
+        open_layout_element.dimensions.width += child_gap
+        if !element_has_clip_horizontal {
+            open_layout_element.min_dimensions.width += child_gap
+        }
+    }
+    else if layout_config.layout_direction == .top_to_bottom {
+        open_layout_element.dimensions.height = top_bottom_padding
+        open_layout_element.min_dimensions.height = top_bottom_padding
+        for i in 0 .. open_layout_element.children_or_text_content.children.length {
+            child_index := ctx.layout_element_children_buffer[ctx.layout_element_children_buffer.len - open_layout_element.children_or_text_content.children.length + i]
+            child := clay__get_layout_element(child_index)
+            open_layout_element.dimensions.height += child.dimensions.height
+            open_layout_element.dimensions.width = clay__max(open_layout_element.dimensions.width, child.dimensions.width + left_right_padding)
+            // Minimum size of child elements doesn't matter to clip containers as they can shrink and hide their contents
+            if !element_has_clip_vertical {
+                open_layout_element.min_dimensions.height += child.min_dimensions.height
+            }
+            if !element_has_clip_horizontal {
+                open_layout_element.min_dimensions.width = clay__max(open_layout_element.min_dimensions.width, child.min_dimensions.width + left_right_padding)
+            }
+            ctx.layout_element_children << child_index
+        }
+        child_gap := f32(clay__max(open_layout_element.children_or_text_content.children.length - 1, 0) * layout_config.child_gap)
+        open_layout_element.dimensions.height += child_gap
+        if !element_has_clip_vertical {
+            open_layout_element.min_dimensions.height += child_gap
+        }
+    }
+
+    ctx.layout_element_children_buffer.delete_last_n(open_layout_element.children_or_text_content.children.length)
+
+    // Clamp element min and max width to the values configured in the layout
+    if layout_config.sizing.width.typ != .percent {
+        if layout_config.sizing.width.size.min_max.max <= 0 { // Set the max size if the user didn't specify, makes calculations easier
+            layout_config.sizing.width.size.min_max.max = clay__max_float
+        }
+        open_layout_element.dimensions.width = clay__min(clay__max(open_layout_element.dimensions.width, layout_config.sizing.width.size.min_max.min), layout_config.sizing.width.size.min_max.max)
+        open_layout_element.min_dimensions.width = clay__min(clay__max(open_layout_element.min_dimensions.width, layout_config.sizing.width.size.min_max.min), layout_config.sizing.width.size.min_max.max)
+    } else {
+        open_layout_element.dimensions.width = 0
+    }
+
+    // Clamp element min and max height to the values configured in the layout
+    if layout_config.sizing.height.typ != .percent {
+        if layout_config.sizing.height.size.min_max.max <= 0 { // Set the max size if the user didn't specify, makes calculations easier
+            layout_config.sizing.height.size.min_max.max = clay__max_float
+        }
+        open_layout_element.dimensions.height = clay__min(clay__max(open_layout_element.dimensions.height, layout_config.sizing.height.size.min_max.min), layout_config.sizing.height.size.min_max.max)
+        open_layout_element.min_dimensions.height = clay__min(clay__max(open_layout_element.min_dimensions.height, layout_config.sizing.height.size.min_max.min), layout_config.sizing.height.size.min_max.max)
+    } else {
+        open_layout_element.dimensions.height = 0
+    }
+
+    clay__update_aspect_ratio_box(mut open_layout_element)
+
+    element_is_floating := clay__element_has_config(open_layout_element, .floating)
+
+    // Close the currently open element
+    closing_element_index := ctx.open_layout_element_stack.pop()
+    open_layout_element = clay__get_open_layout_element()
+
+    if !element_is_floating && ctx.open_layout_element_stack.len > 1 {
+        open_layout_element.children_or_text_content.children.length++
+        ctx.layout_element_children_buffer << closing_element_index
+    }
+}
+
 pub fn clay__hash_string(key string, seed u32) Clay_ElementId {
 	mut hash := seed
 
@@ -191,6 +338,10 @@ pub fn clay__store_text_element_config(c Clay_TextElementConfig) &Clay_TextEleme
 
 
 
+struct Clay__Wrapper[T] {
+    wrapped T
+}
+
 @[params]
 struct Clay_TextElementConfig {
 	// A pointer that will be transparently passed through to the resulting render command.
@@ -247,6 +398,12 @@ struct Clay_CornerRadius {
 	bottom_right f32
 }
 
+// Controls the sizing of this element along one axis inside its parent container.
+struct Clay_Sizing {
+    width Clay_SizingAxis // Controls the width sizing of the element, along the x axis.
+    height Clay_SizingAxis // Controls the height sizing of the element, along the y axis.
+}
+
 struct Clay_Padding {
 	left u16
 	right  u16
@@ -254,11 +411,117 @@ struct Clay_Padding {
 	bottom u16
 }
 
+struct Clay_ChildAlignment {
+    x Clay_LayoutAlignmentX // Controls alignment of children along the x axis.
+    y Clay_LayoutAlignmentY // Controls alignment of children along the y axis.
+}
+
+enum Clay__ElementConfigType as u8 {
+	none
+	border
+	floating
+	clip
+	aspect
+	image
+	text
+	custom
+	shared
+}
+
+union Clay_ElementConfigUnion {
+	text_element_config &Clay_TextElementConfig
+	aspect_ratio_element_config &Clay_AspectRatioElementConfig
+	image_element_config &Clay_ImageElementConfig
+	floating_element_config &Clay_FloatingElementConfig
+	custom_element_config &Clay_CustomElementConfig
+	clip_element_config &Clay_ClipElementConfig
+	border_element_config &Clay_BorderElementConfig
+	shared_element_config &Clay_SharedElementConfig
+}
+
+struct Clay_ElementConfig {
+	type Clay__ElementConfigType
+	config Clay_ElementConfigUnion
+}
+
 struct Clay_ElementId {
 	id u32  		 // The resulting hash generated from the other fields.
 	offset u32 		 // A numerical offset applied after computing the hash from stringId.
 	base_id u32 	 // A base hash value to start from, for example the parent element ID is used when calculating CLAY_ID_LOCAL().
 	string_id string // The string id to hash.
+}
+
+struct Clay_ElementDeclaration {
+	// Primarily created via the CLAY_ID(), CLAY_IDI(), CLAY_ID_LOCAL() and CLAY_IDI_LOCAL() macros.
+    // Represents a hashed string ID used for identifying and finding specific clay UI elements, required by functions such as Clay_PointerOver() and Clay_GetElementData().
+    id Clay_ElementId
+    // Controls various settings that affect the size and position of an element, as well as the sizes and positions of any child elements.
+    layout Clay_LayoutConfig
+    // Controls the background color of the resulting element.
+    // By convention specified as 0-255, but interpretation is up to the renderer.
+    // If no other config is specified, .backgroundColor will generate a RECTANGLE render command, otherwise it will be passed as a property to IMAGE or CUSTOM render commands.
+    backgroundColor Clay_Color
+    // Controls the "radius", or corner rounding of elements, including rectangles, borders and images.
+    cornerRadius Clay_CornerRadius
+    // Controls settings related to aspect ratio scaling.
+    aspectRatio Clay_AspectRatioElementConfig
+    // Controls settings related to image elements.
+    image Clay_ImageElementConfig
+    // Controls whether and how an element "floats", which means it layers over the top of other elements in z order, and doesn't affect the position and size of siblings or parent elements.
+    // Note: in order to activate floating, .floating.attachTo must be set to something other than the default value.
+    floating Clay_FloatingElementConfig
+    // Used to create CUSTOM render commands, usually to render element types not supported by Clay.
+    custom Clay_CustomElementConfig
+    // Controls whether an element should clip its contents, as well as providing child x,y offset configuration for scrolling.
+    clip Clay_ClipElementConfig
+    // Controls settings related to element borders, and will generate BORDER render commands.
+    border Clay_BorderElementConfig
+    // A pointer that will be transparently passed through to resulting render commands.
+    userData voidptr
+}
+
+enum Clay_LayoutDirection as u8 {
+	left_to_right
+	top_to_bottom
+}
+
+enum Clay_LayoutAlignmentX as u8 {
+    // (Default) Aligns child elements to the left hand side of this element, offset by padding.width.left
+    clay_align_x_left
+    // Aligns child elements to the right hand side of this element, offset by padding.width.right
+    clay_align_x_right
+    // Aligns child elements horizontally to the center of this element
+    clay_align_x_center
+}
+
+// Controls the alignment along the y axis (vertical) of child elements.
+enum Clay_LayoutAlignmentY as u8 {
+    // (Default) Aligns child elements to the top of this element, offset by padding.width.top
+    clay_align_y_top
+    // Aligns child elements to the bottom of this element, offset by padding.width.bottom
+    clay_align_y_bottom
+    // Aligns child elements vertically to the center of this element
+    clay_align_y_center
+}
+
+struct Clay_LayoutConfig {
+ 	sizing Clay_Sizing // Controls the sizing of this element inside it's parent container, including FIT, GROW, PERCENT and FIXED sizing.
+    padding Clay_Padding // Controls "padding" in pixels, which is a gap between the bounding box of this element and where its children will be placed.
+    childGap u16 // Controls the gap in pixels between child elements along the layout axis (horizontal gap for LEFT_TO_RIGHT, vertical gap for TOP_TO_BOTTOM).
+    childAlignment Clay_ChildAlignment // Controls how child elements are aligned on each axis.
+    layoutDirection Clay_LayoutDirection // Controls the direction in which child elements will be automatically laid out.
+}
+
+struct Clay_LayoutElement {
+	children_or_text_content union {
+		children Clay__LayoutElementChildren
+		text_element_data &Clay_TextElementData
+	}
+	dimensions Clay_Dimensions
+	min_dimensions Clay_Dimensions
+	layout_config &Clay_LayoutConfig
+	element_configs Clay_ElementConfigArraySlice
+	id u32
 }
 
 struct Clay_Context {
