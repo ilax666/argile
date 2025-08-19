@@ -811,32 +811,265 @@ enum Clay_FloatingClipToElement as u8 {
     clay_clip_to_attached_parent
 }
 
-enum Clay__ElementConfigType as u8 {
-	none
-	border
-	floating
-	clip
-	aspect
-	image
-	text
-	custom
-	shared
+// Controls various settings related to "floating" elements, which are elements that "float" above other elements, potentially overlapping their boundaries,
+// and not affecting the layout of sibling or parent elements.
+struct Clay_FloatingElementConfig {
+    // Offsets this floating element by the provided x,y coordinates from its attachPoints.
+    offset Clay_Vector2
+    // Expands the boundaries of the outer floating element without affecting its children.
+    expand Clay_Dimensions
+    // When used in conjunction with .attachTo = clay_attach_to_element_with_id, attaches this floating element to the element in the hierarchy with the provided ID.
+    // Hint: attach the ID to the other element with .id = clay_id("yourId"), and specify the id the same way, with .parentId = clay_id("yourId").id
+    parentId u32
+    // Controls the z index of this floating element and all its children. Floating elements are sorted in ascending z order before output.
+    // zIndex is also passed to the renderer for all elements contained within this floating element.
+    zIndex i16
+    // Controls how mouse pointer events like hover and click are captured or passed through to elements underneath / behind a floating element.
+    // Enum is of the form CLAY_ATTACH_POINT_foo_bar. See Clay_FloatingAttachPoints for more details.
+    // Note: see <img src="https://github.com/user-attachments/assets/b8c6dfaa-c1b1-41a4-be55-013473e4a6ce />
+    // and <img src="https://github.com/user-attachments/assets/ebe75e0d-1904-46b0-982d-418f929d1516 /> for a visual explanation.
+    attach_points Clay_FloatingAttachPoints
+    // Controls how mouse pointer events like hover and click are captured or passed through to elements underneath a floating element.
+    // CLAY_POINTER_CAPTURE_MODE_CAPTURE (default) - "Capture" the pointer event and don't allow events like hover and click to pass through to elements underneath.
+    // CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH - Transparently pass through pointer events like hover and click to elements underneath the floating element.
+    pointer_capture_mode Clay_PointerCaptureMode
+    // Controls which element a floating element is "attached" to (i.e. relative offset from).
+    // clay_attach_to_none (default) - Disables floating for this element.
+    // clay_attach_to_parent - Attaches this floating element to its parent, positioned based on the .attachPoints and .offset fields.
+    // clay_attach_to_element_with_id - Attaches this floating element to an element with a specific ID, specified with the .parentId field. positioned based on the .attachPoints and .offset fields.
+    // clay_attach_to_root - Attaches this floating element to the root of the layout, which combined with the .offset field provides functionality similar to "absolute positioning".
+    attach_to Clay_FloatingAttachToElement
+    // Controls whether or not a floating element is clipped to the same clipping rectangle as the element it's attached to.
+    // clay_clip_to_none (default) - The floating element does not inherit clipping.
+    // clay_clip_to_attached_parent - The floating element is clipped to the same clipping rectangle as the element it's attached to.
+    clip_to Clay_FloatingClipToElement
 }
 
-union Clay_ElementConfigUnion {
-	text_element_config &Clay_TextElementConfig
-	aspect_ratio_element_config &Clay_AspectRatioElementConfig
-	image_element_config &Clay_ImageElementConfig
-	floating_element_config &Clay_FloatingElementConfig
-	custom_element_config &Clay_CustomElementConfig
-	clip_element_config &Clay_ClipElementConfig
-	border_element_config &Clay_BorderElementConfig
-	shared_element_config &Clay_SharedElementConfig
+// Custom -----------------------------
+
+// Controls various settings related to custom elements.
+struct Clay_CustomElementConfig {
+    // A transparent pointer through which you can pass custom data to the renderer.
+    // Generates CUSTOM render commands.
+    customData voidptr
 }
 
-struct Clay_ElementConfig {
-	type Clay__ElementConfigType
-	config Clay_ElementConfigUnion
+// Scroll -----------------------------
+
+// Controls the axis on which an element switches to "scrolling", which clips the contents and allows scrolling in that direction.
+struct Clay_ClipElementConfig {
+    horizontal bool // Clip overflowing elements on the X axis.
+    vertical bool // Clip overflowing elements on the Y axis.
+    childOffset Clay_Vector2 // Offsets the x,y positions of all child elements. Used primarily for scrolling containers.
+}
+
+// Border -----------------------------
+
+// Controls the widths of individual element borders.
+struct Clay_BorderWidth {
+    left u16
+    right u16
+    top u16
+    bottom u16
+    // Creates borders between each child element, depending on the .layoutDirection.
+    // e.g. for LEFT_TO_RIGHT, borders will be vertical lines, and for TOP_TO_BOTTOM borders will be horizontal lines.
+    // .betweenChildren borders will result in individual RECTANGLE render commands being generated.
+    betweenChildren u16
+}
+
+// Controls settings related to element borders.
+struct Clay_BorderElementConfig {
+    color Clay_Color // Controls the color of all borders with width > 0. Conventionally represented as 0-255, but interpretation is up to the renderer.
+    width Clay_BorderWidth // Controls the widths of individual borders. At least one of these should be > 0 for a BORDER render command to be generated.
+}
+
+// Render Command Data -----------------------------
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_TEXT
+struct Clay_TextRenderData {
+    // A string slice containing the text to be rendered.
+    // Note: this is not guaranteed to be null terminated.
+    stringContents string
+    // Conventionally represented as 0-255 for each channel, but interpretation is up to the renderer.
+    textColor Clay_Color
+    // An integer representing the font to use to render this text, transparently passed through from the text declaration.
+    fontId u16
+    fontSize u16
+    // Specifies the extra whitespace gap in pixels between each character.
+    letterSpacing u16
+    // The height of the bounding box for this line of text.
+    lineHeight u16
+}
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE
+struct Clay_RectangleRenderData {
+    // The solid background color to fill this rectangle with. Conventionally represented as 0-255 for each channel, but interpretation is up to the renderer.
+    backgroundColor Clay_Color
+    // Controls the "radius", or corner rounding of elements, including rectangles, borders and images.
+    // The rounding is determined by drawing a circle inset into the element corner by (radius, radius) pixels.
+    cornerRadius Clay_CornerRadius
+}
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE
+struct Clay_ImageRenderData {
+    // The tint color for this image. Note that the default value is 0,0,0,0 and should likely be interpreted
+    // as "untinted".
+    // Conventionally represented as 0-255 for each channel, but interpretation is up to the renderer.
+    backgroundColor Clay_Color
+    // Controls the "radius", or corner rounding of this image.
+    // The rounding is determined by drawing a circle inset into the element corner by (radius, radius) pixels.
+    cornerRadius Clay_CornerRadius
+    // A pointer transparently passed through from the original element definition, typically used to represent image data.
+    imageData voidptr
+}
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM
+struct Clay_CustomRenderData {
+    // Passed through from .backgroundColor in the original element declaration.
+    // Conventionally represented as 0-255 for each channel, but interpretation is up to the renderer.
+    backgroundColor Clay_Color
+    // Controls the "radius", or corner rounding of this custom element.
+    // The rounding is determined by drawing a circle inset into the element corner by (radius, radius) pixels.
+    cornerRadius Clay_CornerRadius
+    // A pointer transparently passed through from the original element definition.
+    customData voidptr
+}
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START || commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END
+struct Clay_ScrollRenderData {
+    horizontal bool
+    vertical bool
+}
+
+// Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_BORDER
+struct Clay_BorderRenderData {
+    // Controls a shared color for all this element's borders.
+    // Conventionally represented as 0-255 for each channel, but interpretation is up to the renderer.
+    color Clay_Color
+    // Specifies the "radius", or corner rounding of this border element.
+    // The rounding is determined by drawing a circle inset into the element corner by (radius, radius) pixels.
+    cornerRadius Clay_CornerRadius
+    // Controls individual border side widths.
+    width Clay_BorderWidth
+}
+
+// A struct union containing data specific to this command's .commandType
+union Clay_RenderData {
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE
+    rectangle Clay_RectangleRenderData
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_TEXT
+    text Clay_TextRenderData
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE
+    image Clay_ImageRenderData
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM
+    custom Clay_CustomRenderData
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_BORDER
+    border Clay_BorderRenderData
+    // Render command data when commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START|END
+    clip Clay_ClipRenderData
+}
+
+// Miscellaneous Structs & Enums ---------------------------------
+
+// Data representing the current internal state of a scrolling element.
+struct Clay_ScrollContainerData {
+    // Note: This is a pointer to the real internal scroll position, mutating it may cause a change in final layout.
+    // Intended for use with external functionality that modifies scroll position, such as scroll bars or auto scrolling.
+    scrollPosition &Clay_Vector2
+    // The bounding box of the scroll element.
+    scrollContainerDimensions Clay_Dimensions
+    // The outer dimensions of the inner scroll container content, including the padding of the parent scroll container.
+    contentDimensions Clay_Dimensions
+    // The config that was originally passed to the clip element.
+    config Clay_ClipElementConfig
+    // Indicates whether an actual scroll container matched the provided ID or if the default struct was returned.
+    found bool
+}
+
+// Bounding box and other data for a specific UI element.
+struct Clay_ElementData {
+    // The rectangle that encloses this UI element, with the position relative to the root of the layout.
+    boundingBox Clay_BoundingBox
+    // Indicates whether an actual Element matched the provided ID or if the default struct was returned.
+    found bool
+}
+
+// Used by renderers to determine specific handling for each render command.
+enum Clay_RenderCommandType as u8 {
+    // This command type should be skipped.
+    clay_render_command_type_none
+    // The renderer should draw a solid color rectangle.
+    clay_render_command_type_rectangle
+    // The renderer should draw a colored border inset into the bounding box.
+    clay_render_command_type_border
+    // The renderer should draw text.
+    clay_render_command_type_text
+    // The renderer should draw an image.
+    clay_render_command_type_image
+    // The renderer should begin clipping all future draw commands, only rendering content that falls within the provided boundingBox.
+    clay_render_command_type_scissor_start
+    // The renderer should finish any previously active clipping, and begin rendering elements in full again.
+    clay_render_command_type_scissor_end
+    // The renderer should provide a custom implementation for handling this render command based on its .customData
+    clay_render_command_type_custom
+}
+
+struct Clay_RenderCommand {
+    // A rectangular box that fully encloses this UI element, with the position relative to the root of the layout.
+    boundingBox Clay_BoundingBox
+    // A struct union containing data specific to this command's commandType.
+    renderData Clay_RenderData
+    // A pointer transparently passed through from the original element declaration.
+    userData voidptr
+    // The id of this element, transparently passed through from the original element declaration.
+    id u32
+    // The z order required for drawing this command correctly.
+    // Note: the render command array is already sorted in ascending order, and will produce correct results if drawn in naive order.
+    // This field is intended for use in batching renderers for improved performance.
+    zIndex i16
+    // Specifies how to handle rendering of this command.
+    // CLAY_RENDER_COMMAND_TYPE_RECTANGLE - The renderer should draw a solid color rectangle.
+    // CLAY_RENDER_COMMAND_TYPE_BORDER - The renderer should draw a colored border inset into the bounding box.
+    // CLAY_RENDER_COMMAND_TYPE_TEXT - The renderer should draw text.
+    // CLAY_RENDER_COMMAND_TYPE_IMAGE - The renderer should draw an image.
+    // CLAY_RENDER_COMMAND_TYPE_SCISSOR_START - The renderer should begin clipping all future draw commands, only rendering content that falls within the provided boundingBox.
+    // CLAY_RENDER_COMMAND_TYPE_SCISSOR_END - The renderer should finish any previously active clipping, and begin rendering elements in full again.
+    // CLAY_RENDER_COMMAND_TYPE_CUSTOM - The renderer should provide a custom implementation for handling this render command based on its .customData
+    commandType Clay_RenderCommandType
+}
+
+// A sized array of render commands.
+struct Clay_RenderCommandArray {
+    // The underlying max capacity of the array, not necessarily all initialized.
+    capacity int
+    // The number of initialized elements in this array. Used for loops and iteration.
+    length int
+    // A pointer to the first element in the internal array.
+    internalArray &Clay_RenderCommand
+}
+
+// Represents the current state of interaction with clay this frame.
+enum Clay_PointerDataInteractionState as u8 {
+    // A left mouse click, or touch occurred this frame.
+    clay_pointer_data_pressed_this_frame
+    // The left mouse button click or touch happened at some point in the past, and is still currently held down this frame.
+    clay_pointer_data_pressed
+    // The left mouse button click or touch was released this frame.
+    clay_pointer_data_released_this_frame
+    // The left mouse button click or touch is not currently down / was released at some point in the past.
+    clay_pointer_data_released
+}
+
+// Information on the current state of pointer interactions this frame.
+struct Clay_PointerData {
+    // The position of the mouse / touch / pointer relative to the root of the layout.
+    position Clay_Vector2
+    // Represents the current state of interaction with clay this frame.
+    // CLAY_POINTER_DATA_PRESSED_THIS_FRAME - A left mouse click, or touch occurred this frame.
+    // CLAY_POINTER_DATA_PRESSED - The left mouse button click or touch happened at some point in the past, and is still currently held down this frame.
+    // CLAY_POINTER_DATA_RELEASED_THIS_FRAME - The left mouse button click or touch was released this frame.
+    // CLAY_POINTER_DATA_RELEASED - The left mouse button click or touch is not currently down / was released at some point in the past.
+    state Clay_PointerDataInteractionState
 }
 
 struct Clay_ElementDeclaration {
@@ -866,6 +1099,110 @@ struct Clay_ElementDeclaration {
     border Clay_BorderElementConfig
     // A pointer that will be transparently passed through to resulting render commands.
     userData voidptr
+}
+
+// Represents the type of error clay encountered while computing layout.
+enum Clay_ErrorType as u8 {
+    // A text measurement function wasn't provided using Clay_SetMeasureTextFunction(), or the provided function was null.
+    clay_error_type_text_measurement_function_not_provided
+    // Clay attempted to allocate its internal data structures but ran out of space.
+    // The arena passed to Clay_Initialize was created with a capacity smaller than that required by Clay_MinMemorySize().
+    clay_error_type_arena_capacity_exceeded
+    // Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxElementCount().
+    clay_error_type_elements_capacity_exceeded
+    // Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxMeasureTextCacheWordCount().
+    clay_error_type_text_measurement_capacity_exceeded
+    // Two elements were declared with exactly the same ID within one layout.
+    clay_error_type_duplicate_id
+    // A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was found.
+    clay_error_type_floating_container_parent_not_found
+    // An element was declared that using CLAY_SIZING_PERCENT but the percentage value was over 1. Percentage values are expected to be in the 0-1 range.
+    clay_error_type_percentage_over_1
+    // Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
+    clay_error_type_internal_error
+}
+
+// Data to identify the error that clay has encountered.
+struct Clay_ErrorData {
+    // Represents the type of error clay encountered while computing layout.
+    // CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED - A text measurement function wasn't provided using Clay_SetMeasureTextFunction(), or the provided function was null.
+    // CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED - Clay attempted to allocate its internal data structures but ran out of space. The arena passed to Clay_Initialize was created with a capacity smaller than that required by Clay_MinMemorySize().
+    // CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED - Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxElementCount().
+    // CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED - Clay ran out of capacity in its internal array for storing elements. This limit can be increased with Clay_SetMaxMeasureTextCacheWordCount().
+    // CLAY_ERROR_TYPE_DUPLICATE_ID - Two elements were declared with exactly the same ID within one layout.
+    // CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND - A floating element was declared using CLAY_ATTACH_TO_ELEMENT_ID and either an invalid .parentId was provided or no element with the provided .parentId was found.
+    // CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 - An element was declared that using CLAY_SIZING_PERCENT but the percentage value was over 1. Percentage values are expected to be in the 0-1 range.
+    // CLAY_ERROR_TYPE_INTERNAL_ERROR - Clay encountered an internal error. It would be wonderful if you could report this so we can fix it!
+    errorType Clay_ErrorType
+    // A string containing human-readable error text that explains the error in more detail.
+    errorText string
+    // A transparent pointer passed through from when the error handler was first provided.
+    userData voidptr
+}
+
+// A wrapper struct around Clay's error handler function.
+struct Clay_ErrorHandler {
+    // A user provided function to call when Clay encounters an error during layout.
+    error_handler_function Clay_ErrorHandlerFn
+    // A pointer that will be transparently passed through to the error handler when it is called.
+    userData voidptr
+}
+
+// Implementation ------------------------------------------------
+
+struct Clay_BooleanWarnings {
+    maxElementsExceeded bool
+    maxRenderCommandsExceeded bool
+    maxTextMeasureCacheExceeded bool
+    textMeasurementFunctionNotSet bool
+}
+
+struct Clay__Warning {
+    baseMessage string
+    dynamicMessage string
+}
+
+struct Clay__WarningArray {
+    capacity int
+    length int
+    internalArray &Clay__Warning
+}
+
+struct Clay_SharedElementConfig {
+    backgroundColor Clay_olor
+    cornerRadius Clay_CornerRadius
+    userData voidptr
+}
+
+
+
+
+enum Clay__ElementConfigType as u8 {
+	none
+	border
+	floating
+	clip
+	aspect
+	image
+	text
+	custom
+	shared
+}
+
+union Clay_ElementConfigUnion {
+	text_element_config &Clay_TextElementConfig
+	aspect_ratio_element_config &Clay_AspectRatioElementConfig
+	image_element_config &Clay_ImageElementConfig
+	floating_element_config &Clay_FloatingElementConfig
+	custom_element_config &Clay_CustomElementConfig
+	clip_element_config &Clay_ClipElementConfig
+	border_element_config &Clay_BorderElementConfig
+	shared_element_config &Clay_SharedElementConfig
+}
+
+struct Clay_ElementConfig {
+	type Clay__ElementConfigType
+	config Clay_ElementConfigUnion
 }
 
 struct Clay_LayoutElement {
