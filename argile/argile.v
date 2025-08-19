@@ -546,10 +546,178 @@ pub fn clay__store_text_element_config(c Clay_TextElementConfig) &Clay_TextEleme
 
 
 
-struct Clay__Wrapper[T] {
-    wrapped T
+// Utility Structs -------------------------
+
+// Clay_Arena is a memory arena structure that is used by clay to manage its internal allocations.
+// Rather than creating it by hand, it's easier to use Clay_CreateArenaWithCapacityAndMemory()
+struct Clay_Arena {
+    next_allocation usize
+    capacity usize
+    memory &u8
 }
 
+struct Clay_Dimensions {
+    width f32
+    height f32
+}
+
+struct Clay_Vector2 {
+    x f32
+    y f32
+}
+
+// Internally clay conventionally represents colors as 0-255, but interpretation is up to the renderer.
+struct Clay_Color {
+    r f32
+    g f32
+    b f32
+    a f32
+}
+
+struct Clay_BoundingBox {
+    x f32
+    y f32
+    width f32
+    height f32
+}
+
+// Primarily created via the CLAY_ID(), CLAY_IDI(), CLAY_ID_LOCAL() and CLAY_IDI_LOCAL() macros.
+// Represents a hashed string ID used for identifying and finding specific clay UI elements, required
+// by functions such as Clay_PointerOver() and Clay_GetElementData().
+struct Clay_ElementId {
+	id u32  		 // The resulting hash generated from the other fields.
+	offset u32 		 // A numerical offset applied after computing the hash from stringId.
+	base_id u32 	 // A base hash value to start from, for example the parent element ID is used when calculating CLAY_ID_LOCAL().
+	string_id string // The string id to hash.
+}
+
+// A sized array of Clay_ElementId.
+struct ClayElementIdArray {
+    capacity       int
+    length         int
+    internal_array &ClayElementId
+}
+
+// Controls the "radius", or corner rounding of elements, including rectangles, borders and images.
+// The rounding is determined by drawing a circle inset into the element corner by (radius, radius) pixels.
+struct Clay_CornerRadius {
+	top_left f32
+	top_right f32
+	bottom_left f32
+	bottom_right f32
+}
+
+// Element Configs ---------------------------
+
+// Controls the direction in which child elements will be automatically laid out.
+enum Clay_LayoutDirection as u8 {
+    // (Default) Lays out child elements from left to right with increasing x.
+	left_to_right
+    // Lays out child elements from top to bottom with increasing y.
+	top_to_bottom
+}
+
+enum Clay_LayoutAlignmentX as u8 {
+    // (Default) Aligns child elements to the left hand side of this element, offset by padding.width.left
+    clay_align_x_left
+    // Aligns child elements to the right hand side of this element, offset by padding.width.right
+    clay_align_x_right
+    // Aligns child elements horizontally to the center of this element
+    clay_align_x_center
+}
+
+// Controls the alignment along the y axis (vertical) of child elements.
+enum Clay_LayoutAlignmentY as u8 {
+    // (Default) Aligns child elements to the top of this element, offset by padding.width.top
+    clay_align_y_top
+    // Aligns child elements to the bottom of this element, offset by padding.width.bottom
+    clay_align_y_bottom
+    // Aligns child elements vertically to the center of this element
+    clay_align_y_center
+}
+
+// Controls how the element takes up space inside its parent container.
+enum Clay__SizingType as u8 {
+	// (default) Wraps tightly to the size of the element's contents.
+    fit
+    // Expands along this axis to fill available space in the parent element, sharing it with other GROW elements.
+	grow
+    // Expects 0-1 range. Clamps the axis size to a percent of the parent container's axis size minus padding and child gaps.
+	percent
+    // Clamps the axis size to an exact size in pixels.
+	fixed
+}
+
+// Controls how child elements are aligned on each axis.
+struct Clay_ChildAlignment {
+    x Clay_LayoutAlignmentX // Controls alignment of children along the x axis.
+    y Clay_LayoutAlignmentY // Controls alignment of children along the y axis.
+}
+
+// Controls the minimum and maximum size in pixels that this element is allowed to grow or shrink to,
+// overriding sizing types such as FIT or GROW.
+@[params]
+struct Clay_SizingMinMax {
+	min f32 = 0.0 // The smallest final size of the element on this axis will be this value in pixels.
+	max f32 = 0.0 // The largest final size of the element on this axis will be this value in pixels.
+}
+
+// Controls the sizing of this element along one axis inside its parent container.
+@[params]
+struct Clay_SizingAxis {
+	size union {
+		Clay_SizingMinMax min_max // Controls the minimum and maximum size in pixels that this element is allowed to grow or shrink to, overriding sizing types such as FIT or GROW.
+		percent f32               // Expects 0-1 range. Clamps the axis size to a percent of the parent container's axis size minus padding and child gaps.
+	}
+	type Clay__SizingType         // Controls how the element takes up space inside its parent container.
+}
+
+// Controls the sizing of this element along one axis inside its parent container.
+struct Clay_Sizing {
+    width Clay_SizingAxis // Controls the width sizing of the element, along the x axis.
+    height Clay_SizingAxis // Controls the height sizing of the element, along the y axis.
+}
+
+// Controls "padding" in pixels, which is a gap between the bounding box of this element and where its children
+// will be placed.
+struct Clay_Padding {
+	left u16
+	right  u16
+	top u16
+	bottom u16
+}
+
+// Controls various settings that affect the size and position of an element, as well as the sizes and positions
+// of any child elements.
+struct Clay_LayoutConfig {
+ 	sizing Clay_Sizing // Controls the sizing of this element inside it's parent container, including FIT, GROW, PERCENT and FIXED sizing.
+    padding Clay_Padding // Controls "padding" in pixels, which is a gap between the bounding box of this element and where its children will be placed.
+    childGap u16 // Controls the gap in pixels between child elements along the layout axis (horizontal gap for LEFT_TO_RIGHT, vertical gap for TOP_TO_BOTTOM).
+    childAlignment Clay_ChildAlignment // Controls how child elements are aligned on each axis.
+    layoutDirection Clay_LayoutDirection // Controls the direction in which child elements will be automatically laid out.
+}
+
+// Controls how text "wraps", that is how it is broken into multiple lines when there is insufficient horizontal space.
+enum Clay_TextElementConfigWrapMode as u8 {
+    // (default) breaks on whitespace characters.
+    clay_text_wrap_words
+    // Don't break on space characters, only on newlines.
+    clay_text_wrap_newlines
+    // Disable text wrapping entirely.
+    clay_text_wrap_none
+}
+
+// Controls how wrapped lines of text are horizontally aligned within the outer text bounding box.
+enum Clay_TextAlignment as u8 {
+    // (default) Horizontally aligns wrapped lines of text to the left hand side of their bounding box.
+    clay_text_align_left
+    // Horizontally aligns wrapped lines of text to the center of their bounding box.
+    clay_text_align_center
+    // Horizontally aligns wrapped lines of text to the right hand side of their bounding box.
+    clay_text_align_right
+}
+
+// Controls various functionality related to text elements.
 @[params]
 struct Clay_TextElementConfig {
 	// A pointer that will be transparently passed through to the resulting render command.
@@ -577,51 +745,70 @@ struct Clay_TextElementConfig {
     text_alignment Clay_TextAlignment
 }
 
-enum Clay__SizingType as u8 {
-	fit
-	grow
-	percent
-	fixed
+// Aspect Ratio --------------------------------
+
+// Controls various settings related to aspect ratio scaling element.
+struct Clay_AspectRatioElementConfig {
+    aspectRatio f32 // A float representing the target "Aspect ratio" for an element, which is its final width divided by its final height.
 }
 
-@[params]
-struct Clay_SizingMinMax {
-	min f32 = 0.0
-	max f32 = 0.0
+// Image --------------------------------
+
+// Controls various settings related to image elements.
+struct Clay_ImageElementConfig {
+    imageData voidptr // A transparent pointer used to pass image data through to the renderer.
 }
 
-@[params]
-struct Clay_SizingAxis {
-	size union {
-		Clay_SizingMinMax min_max
-		percent f32
-	}
-	type Clay__SizingType
+// Floating -----------------------------
+
+// Controls where a floating element is offset relative to its parent element.
+// Note: see https://github.com/user-attachments/assets/b8c6dfaa-c1b1-41a4-be55-013473e4a6ce for a visual explanation.
+enum Clay_FloatingAttachPointType as u8 {
+    clay_attach_point_left_top
+    clay_attach_point_left_center
+    clay_attach_point_left_bottom
+    clay_attach_point_center_top
+    clay_attach_point_center_center
+    clay_attach_point_center_bottom
+    clay_attach_point_right_top
+    clay_attach_point_right_center
+    clay_attach_point_right_bottom
 }
 
-struct Clay_CornerRadius {
-	top_left f32
-	top_right f32
-	bottom_left f32
-	bottom_right f32
+// Controls where a floating element is offset relative to its parent element.
+struct Clay_FloatingAttachPoints {
+    element Clay_FloatingAttachPointType // Controls the origin point on a floating element that attaches to its parent.
+    parent Clay_FloatingAttachPointType // Controls the origin point on the parent element that the floating element attaches to.
 }
 
-// Controls the sizing of this element along one axis inside its parent container.
-struct Clay_Sizing {
-    width Clay_SizingAxis // Controls the width sizing of the element, along the x axis.
-    height Clay_SizingAxis // Controls the height sizing of the element, along the y axis.
+// Controls how mouse pointer events like hover and click are captured or passed through to elements underneath a floating element.
+enum Clay_PointerCaptureMode as u8 {
+    // (default) "Capture" the pointer event and don't allow events like hover and click to pass through to elements underneath.
+    clay_pointer_capture_mode_capture
+    //    CLAY_POINTER_CAPTURE_MODE_PARENT, TODO pass pointer through to attached parent
+
+    // Transparently pass through pointer events like hover and click to elements underneath the floating element.
+    clay_pointer_capture_mode_passthrough
 }
 
-struct Clay_Padding {
-	left u16
-	right  u16
-	top u16
-	bottom u16
+// Controls which element a floating element is "attached" to (i.e. relative offset from).
+enum Clay_FloatingAttachToElement as u8 {
+    // (default) Disables floating for this element.
+    clay_attach_to_none
+    // Attaches this floating element to its parent, positioned based on the .attachPoints and .offset fields.
+    clay_attach_to_parent
+    // Attaches this floating element to an element with a specific ID, specified with the .parentId field. positioned based on the .attachPoints and .offset fields.
+    clay_attach_to_element_with_id
+    // Attaches this floating element to the root of the layout, which combined with the .offset field provides functionality similar to "absolute positioning".
+    clay_attach_to_root
 }
 
-struct Clay_ChildAlignment {
-    x Clay_LayoutAlignmentX // Controls alignment of children along the x axis.
-    y Clay_LayoutAlignmentY // Controls alignment of children along the y axis.
+// Controls whether or not a floating element is clipped to the same clipping rectangle as the element it's attached to.
+enum Clay_FloatingClipToElement as u8 {
+    // (default) - The floating element does not inherit clipping.
+    clay_clip_to_none
+    // The floating element is clipped to the same clipping rectangle as the element it's attached to.
+    clay_clip_to_attached_parent
 }
 
 enum Clay__ElementConfigType as u8 {
@@ -652,13 +839,6 @@ struct Clay_ElementConfig {
 	config Clay_ElementConfigUnion
 }
 
-struct Clay_ElementId {
-	id u32  		 // The resulting hash generated from the other fields.
-	offset u32 		 // A numerical offset applied after computing the hash from stringId.
-	base_id u32 	 // A base hash value to start from, for example the parent element ID is used when calculating CLAY_ID_LOCAL().
-	string_id string // The string id to hash.
-}
-
 struct Clay_ElementDeclaration {
 	// Primarily created via the CLAY_ID(), CLAY_IDI(), CLAY_ID_LOCAL() and CLAY_IDI_LOCAL() macros.
     // Represents a hashed string ID used for identifying and finding specific clay UI elements, required by functions such as Clay_PointerOver() and Clay_GetElementData().
@@ -686,38 +866,6 @@ struct Clay_ElementDeclaration {
     border Clay_BorderElementConfig
     // A pointer that will be transparently passed through to resulting render commands.
     userData voidptr
-}
-
-enum Clay_LayoutDirection as u8 {
-	left_to_right
-	top_to_bottom
-}
-
-enum Clay_LayoutAlignmentX as u8 {
-    // (Default) Aligns child elements to the left hand side of this element, offset by padding.width.left
-    clay_align_x_left
-    // Aligns child elements to the right hand side of this element, offset by padding.width.right
-    clay_align_x_right
-    // Aligns child elements horizontally to the center of this element
-    clay_align_x_center
-}
-
-// Controls the alignment along the y axis (vertical) of child elements.
-enum Clay_LayoutAlignmentY as u8 {
-    // (Default) Aligns child elements to the top of this element, offset by padding.width.top
-    clay_align_y_top
-    // Aligns child elements to the bottom of this element, offset by padding.width.bottom
-    clay_align_y_bottom
-    // Aligns child elements vertically to the center of this element
-    clay_align_y_center
-}
-
-struct Clay_LayoutConfig {
- 	sizing Clay_Sizing // Controls the sizing of this element inside it's parent container, including FIT, GROW, PERCENT and FIXED sizing.
-    padding Clay_Padding // Controls "padding" in pixels, which is a gap between the bounding box of this element and where its children will be placed.
-    childGap u16 // Controls the gap in pixels between child elements along the layout axis (horizontal gap for LEFT_TO_RIGHT, vertical gap for TOP_TO_BOTTOM).
-    childAlignment Clay_ChildAlignment // Controls how child elements are aligned on each axis.
-    layoutDirection Clay_LayoutDirection // Controls the direction in which child elements will be automatically laid out.
 }
 
 struct Clay_LayoutElement {
